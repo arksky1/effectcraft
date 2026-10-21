@@ -9,11 +9,12 @@ use crate::EffectcraftApp;
 pub(crate) mod effects;
 /// Translations for the panels, tooltips and dialogs below the menu bar (see the module docs).
 mod ui;
+mod ko;
 use effectcraft_engine::menus::{MenuEntry, MenuNode};
 pub(crate) use ui::{set_current, tr, tr_args};
 
 /// Every language with a catalog, in the order Settings ▸ General ▸ Language lists them.
-const CATALOG_CODES: [&str; 10] = ["ja", "zh-hans", "zh-hant", "uk", "es", "pt-br", "ru", "fr", "de", "cs"];
+const CATALOG_CODES: [&str; 11] = ["ja", "zh-hans", "zh-hant", "uk", "es", "pt-br", "ru", "fr", "de", "cs", "ko"];
 
 /// The active interface language: the stored preference when it names a catalog, otherwise `en`
 /// (English is the source of every label and needs no lookup).
@@ -86,6 +87,7 @@ fn supported(locale: Option<&str>) -> &'static str {
     let primary = parts.next().unwrap_or_default().to_ascii_lowercase();
     let rest: Vec<String> = parts.map(|p| p.to_ascii_lowercase()).collect();
     match primary.as_str() {
+        "ko" => "ko",
         "ja" => "ja",
         "uk" => "uk",
         "es" => "es",
@@ -131,6 +133,7 @@ pub(crate) fn label<'a>(app: &EffectcraftApp, command: &str, source: &'a str) ->
 /// The menu catalog for `language`; `None` for English.
 fn menu_catalog(language: &str) -> Option<&'static [(&'static str, &'static str, &'static str)]> {
     Some(match language {
+        "ko" => ko::MENU,
         "ja" => JAPANESE,
         "zh-hans" => SIMPLIFIED_CHINESE,
         "zh-hant" => TRADITIONAL_CHINESE,
@@ -172,6 +175,27 @@ pub(crate) fn context_item(command: &str, params: &serde_json::Value, source: &s
 }
 
 pub(crate) fn entry(app: &EffectcraftApp, e: &MenuEntry, shown: String) -> String {
+    if language(app) == "ko" {
+        return match e.command.as_str() {
+            "edit.undo" => app.session.history.undo.last()
+                .map(|action| ui::tr_in("ko", "Undo {action}").replace("{action}", &action.0))
+                .unwrap_or_else(|| ui::tr_in("ko", "Nothing to undo").into()),
+            "edit.redo" => app.session.history.redo.last()
+                .map(|action| ui::tr_in("ko", "Redo {action}").replace("{action}", &action.0))
+                .unwrap_or_else(|| ui::tr_in("ko", "Nothing to redo").into()),
+            "effect.apply" => e.params.get("effect").and_then(|v| v.as_str())
+                .map_or_else(|| shown.clone(), |id| effects::name(id, &e.label)),
+            "window.panel" => {
+                let prefix = format!("{}: ", e.label);
+                shown.strip_prefix(&prefix).map_or_else(
+                    || label(app, &e.command, &shown).into(),
+                    |name| format!("{}: {name}", label(app, &e.command, &e.label)),
+                )
+            }
+            _ if shown == e.label => label(app, &e.command, &e.label).into(),
+            _ => shown,
+        };
+    }
     // The generated Effect menu's entries label themselves with the effect's registry name; the
     // catalog replaces it with the interface language's (#821). The entry keeps its command and
     // its `{"effect": <id>}` params, so a script, an expression or the control channel is
@@ -6814,6 +6838,7 @@ mod tests {
         let mut french_keys = BTreeSet::new();
         let mut german_keys = BTreeSet::new();
         let mut czech_keys = BTreeSet::new();
+        let mut korean_keys = BTreeSet::new();
         for (catalog, unique) in [
             (JAPANESE, &mut japanese_keys),
             (SIMPLIFIED_CHINESE, &mut chinese_keys),
@@ -6825,6 +6850,7 @@ mod tests {
             (FRENCH, &mut french_keys),
             (GERMAN, &mut german_keys),
             (CZECH, &mut czech_keys),
+            (ko::MENU, &mut korean_keys),
         ] {
             for (command, en, translated) in catalog {
                 let key = (command.to_string(), en.to_string());
@@ -6854,6 +6880,7 @@ mod tests {
         assert_eq!(ukrainian_keys, russian_keys, "the languages must translate the same entries");
         assert_eq!(russian_keys, french_keys, "the languages must translate the same entries");
         assert_eq!(french_keys, german_keys, "the languages must translate the same entries");
+        assert_eq!(japanese_keys, korean_keys, "Korean covers the same fixed menu entries");
         assert_eq!(japanese_keys, czech_keys, "the languages must translate the same entries");
     }
 
@@ -7233,5 +7260,35 @@ mod tests {
         // No renderer here: drop the frame's texture uploads (egui asserts on unhandled ones in debug).
         out.textures_delta.clear();
         assert!(app.auto.find("settings.general.language").is_some());
+    }
+}
+
+
+#[cfg(test)]
+mod korean_tests {
+    use super::*;
+
+    #[test]
+    fn korean_language_persists_and_native_menu_bindings_stay_the_same() {
+        let mut app = EffectcraftApp::new(effectcraft_engine::Session::default());
+        app.session.execute("prefs.set", serde_json::json!({"key":"general.language","value":"en"})).unwrap();
+        let en = crate::native_menu::build(&app);
+        app.session.execute("prefs.set", serde_json::json!({"key":"general.language","value":"ko"})).unwrap();
+        let ko = crate::native_menu::build(&app);
+        let bindings = |menu: &crate::native_menu::NativeMenu| {
+            menu.items().into_iter().map(|item| (item.id.clone(), item.command.clone(), item.params.clone(), item.shortcut.clone())).collect::<Vec<_>>()
+        };
+        assert_eq!(bindings(&en), bindings(&ko));
+        assert_eq!(language(&app), "ko");
+        assert_eq!(supported(Some("ko-KR")), "ko");
+        let saved = serde_json::to_string(&app.session.prefs).unwrap();
+        let restored: effectcraft_engine::prefs::Prefs = serde_json::from_str(&saved).unwrap();
+        assert_eq!(restored.general.language, "ko");
+        assert_eq!(label(&app, "edit.undo", "Undo"), "실행 취소");
+        assert_eq!(label(&app, "unknown", "User File"), "User File");
+        set_current("ko");
+        assert_eq!(tr_args("Drop {} files to import", &[&2]), "파일 2개를 놓아 가져오기");
+        assert_eq!(effects::group("ec.blur.gaussian", "My blur"), "My blur");
+        set_current("en");
     }
 }
