@@ -104,6 +104,12 @@ fn supported(locale: Option<&str>) -> &'static str {
 
 pub(crate) fn label<'a>(app: &EffectcraftApp, command: &str, source: &'a str) -> &'a str {
     let language = language(app);
+    if language == "ko" && matches!(command, "file.revealInFinder" | "layer.revealInFinder") {
+        match source {
+            "Reveal in Explorer" | "Reveal in File Manager" => return ui::tr_in("ko", source),
+            _ => {}
+        }
+    }
     // The engine names the platform's file manager before the catalog sees the label. These
     // two commands keep their ids, but on Windows/Linux their source is no longer "Finder".
     if language == "uk" && matches!(command, "file.revealInFinder" | "layer.revealInFinder") {
@@ -247,6 +253,26 @@ pub(crate) fn effect_category(children: &[MenuNode], source: &str) -> Option<Str
 
 pub(crate) fn submenu(app: &EffectcraftApp, source: &str, shown: String) -> String {
     match language(app) {
+        "ko" => {
+            if source == "Assign Shortcut to Workspace" {
+                if let Some(name) = shown.strip_prefix("Assign Shortcut to “").and_then(|s| s.strip_suffix("” Workspace")) {
+                    // A saved name can be identical to a built-in caption. Preserve it.
+                    let name = if name == "Default" && app.ui.workspace == "Default" && !app.ui.saved_workspaces.contains_key(name) {
+                        label(app, "window.workspace", name)
+                    } else {
+                        name
+                    };
+                    return ui::tr_in("ko", "Assign Shortcut to “{}” Workspace").replacen("{}", name, 1);
+                }
+            } else if source == "Assign Shortcut to 3D View"
+                && let Some(name) = shown.strip_prefix("Assign Shortcut to “").and_then(|s| s.strip_suffix('”'))
+            {
+                let name = ko::MENU.iter()
+                    .find(|(command, english, _)| command.starts_with("view.3d.") && *english == name)
+                    .map_or(name, |(_, _, translated)| *translated);
+                return ui::tr_in("ko", "Assign Shortcut to “{name}”").replacen("{name}", name, 1);
+            }
+        }
         "cs" => {
             if source == "Assign Shortcut to Workspace" {
                 if let Some(name) = shown.strip_prefix("Assign Shortcut to “").and_then(|s| s.strip_suffix("” Workspace")) {
@@ -7290,5 +7316,38 @@ mod korean_tests {
         assert_eq!(tr_args("Drop {} files to import", &[&2]), "파일 2개를 놓아 가져오기");
         assert_eq!(effects::group("ec.blur.gaussian", "My blur"), "My blur");
         set_current("en");
+    }
+}
+
+#[cfg(test)]
+mod korean_composite_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn generated_menu_captions_translate_without_renaming_user_values() {
+        let mut app = EffectcraftApp::new(effectcraft_engine::Session::default());
+        app.session.execute("prefs.set", json!({"key": "general.language", "value": "ko"})).unwrap();
+        for command in ["file.revealInFinder", "layer.revealInFinder"] {
+            for (source, ko) in [("Reveal in Explorer", "파일 탐색기에서 보기"), ("Reveal in File Manager", "파일 관리자에서 보기")] {
+                let entry_value = MenuEntry { label: source.into(), command: command.into(), params: json!({"item": "Default {name}.mp4"}), shortcut: None, alt_shortcuts: vec![] };
+                assert_eq!(label(&app, command, source), ko);
+                assert_eq!(entry(&app, &entry_value, source.into()), ko);
+                assert_eq!(label(&app, "file.openRecent", source), source);
+                assert_eq!(entry_value.params["item"], "Default {name}.mp4");
+            }
+        }
+        assert_eq!(submenu(&app, "Assign Shortcut to Workspace", "Assign Shortcut to “Default” Workspace".into()), "“기본값” 작업 영역에 단축키 지정");
+        app.ui.saved_workspaces.insert("Default".into(), app.ui.dock.clone());
+        assert_eq!(submenu(&app, "Assign Shortcut to Workspace", "Assign Shortcut to “Default” Workspace".into()), "“Default” 작업 영역에 단축키 지정");
+        app.ui.workspace = "User {name}".into();
+        assert_eq!(submenu(&app, "Assign Shortcut to Workspace", "Assign Shortcut to “User {name}” Workspace".into()), "“User {name}” 작업 영역에 단축키 지정");
+        for (name, ko) in [("Top", "윗면"), ("Default", "기본값"), ("Custom View 1", "사용자 지정 보기 1")] {
+            assert_eq!(submenu(&app, "Assign Shortcut to 3D View", format!("Assign Shortcut to “{name}”")), format!("“{ko}”에 단축키 지정"));
+        }
+        app.session.execute("prefs.set", json!({"key": "general.language", "value": "en"})).unwrap();
+        assert_eq!(label(&app, "file.revealInFinder", "Reveal in Explorer"), "Reveal in Explorer");
+        let original = "Assign Shortcut to “User {name}” Workspace";
+        assert_eq!(submenu(&app, "Assign Shortcut to Workspace", original.into()), original);
     }
 }

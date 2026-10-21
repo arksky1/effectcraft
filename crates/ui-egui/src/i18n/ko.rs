@@ -632,6 +632,10 @@ pub(super) const MENU: &[(&str, &str, &str)] = &[
 ];
 
 pub(super) const UI: &[(&str, &str)] = &[
+    ("Reveal in Explorer", "파일 탐색기에서 보기"),
+    ("Reveal in File Manager", "파일 관리자에서 보기"),
+    ("Assign Shortcut to “{}” Workspace", "“{}” 작업 영역에 단축키 지정"),
+    ("Assign Shortcut to “{name}”", "“{name}”에 단축키 지정"),
     ("Appearance Settings…", "화면 설정…"),
     ("Add to favorites", "즐겨찾기에 추가"),
     ("Remove from favorites", "즐겨찾기에서 제거"),
