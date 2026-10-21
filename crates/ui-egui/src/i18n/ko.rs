@@ -1709,4 +1709,3 @@ pub(super) const CATEGORIES: &[(&str, &str)] = &[
     ("Utility", "유틸리티"),
     ("Generate", "생성"),
 ];
-
